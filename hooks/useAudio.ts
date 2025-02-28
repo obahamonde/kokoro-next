@@ -1,4 +1,4 @@
-"use client"
+"use client";
 import { useState, useRef, useEffect } from "react";
 import { OpenAI } from "openai";
 import { openaiConfig } from "./config.json";
@@ -10,14 +10,14 @@ const client = new OpenAI({
 });
 
 export default function useAudio(sendMessage: (content: string) => Promise<void>) {
-    const [isRecording, setIsRecording] = useState(false);
-    const [isPlaying, setIsPlaying] = useState(false);
-    const [isPanelOpen, setIsPanelOpen] = useState(false);
+    const [isRecording, setIsRecording] = useState<boolean>(false);
+    const [isPlaying, setIsPlaying] = useState<boolean>(false);
+    const [isPanelOpen, setIsPanelOpen] = useState<boolean>(false);
     const [audioUrl, setAudioUrl] = useState<string | null>(null);
-    const [transcript, setTranscript] = useState("");
+    const [transcript, setTranscript] = useState<string>("");
     const [userWaveform, setUserWaveform] = useState<number[]>([]);
     const [aiWaveform, setAiWaveform] = useState<number[]>([]);
-    const [lastResponse, setLastResponse] = useState(0);
+    const [lastResponse, setLastResponse] = useState<number>(0);
     const [audioError, setAudioError] = useState<string | null>(null);
 
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -26,16 +26,12 @@ export default function useAudio(sendMessage: (content: string) => Promise<void>
     const analyserRef = useRef<AnalyserNode | null>(null);
     const audioPlayerRef = useRef<HTMLAudioElement>(null);
 
-    // Initialize audio context
     useEffect(() => {
-
         if (!audioContextRef.current) {
-            audioContextRef.current = new (window.AudioContext ||
-                (window as any).webkitAudioContext)();
+            audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
             analyserRef.current = audioContextRef.current.createAnalyser();
             analyserRef.current.fftSize = 256;
         }
-
         return () => {
             if (audioContextRef.current) {
                 audioContextRef.current.close();
@@ -48,27 +44,21 @@ export default function useAudio(sendMessage: (content: string) => Promise<void>
     };
 
     const startRecording = async () => {
-        setLastResponse(new Date().getTime())
+        setLastResponse(new Date().getTime());
         try {
             audioChunksRef.current = [];
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-
-            // Set up audio visualization
             if (audioContextRef.current && analyserRef.current) {
                 const source = audioContextRef.current.createMediaStreamSource(stream);
                 source.connect(analyserRef.current);
-
-                // Start waveform visualization
                 const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
                 const updateWaveform = () => {
                     if (!isRecording) return;
-
                     analyserRef.current!.getByteFrequencyData(dataArray);
                     const normalizedData = Array.from(dataArray)
                         .slice(0, 50)
                         .map(val => val / 255);
                     setUserWaveform(normalizedData);
-
                     requestAnimationFrame(updateWaveform);
                 };
                 updateWaveform();
@@ -76,7 +66,7 @@ export default function useAudio(sendMessage: (content: string) => Promise<void>
 
             mediaRecorderRef.current = new MediaRecorder(stream);
 
-            mediaRecorderRef.current.ondataavailable = (event) => {
+            mediaRecorderRef.current.ondataavailable = (event: BlobEvent) => {
                 if (event.data.size > 0) {
                     audioChunksRef.current.push(event.data);
                 }
@@ -85,11 +75,8 @@ export default function useAudio(sendMessage: (content: string) => Promise<void>
             mediaRecorderRef.current.onstop = async () => {
                 const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
                 await transcribeAudio(audioBlob);
-
-                // Clean up stream tracks
                 stream.getTracks().forEach(track => track.stop());
             };
-
             mediaRecorderRef.current.start();
             setIsRecording(true);
             setAudioError(null);
@@ -97,8 +84,8 @@ export default function useAudio(sendMessage: (content: string) => Promise<void>
             console.error("Error starting recording:", error);
             setAudioError("Could not access microphone. Please check permissions.");
         }
-        console.log(`Lasted ${new Date().getTime() - lastResponse}`)
-        console.log(setLastResponse(0))
+        console.log(`Lasted ${new Date().getTime() - lastResponse}`);
+        console.log(setLastResponse(0));
     };
 
     const stopRecording = () => {
@@ -132,56 +119,63 @@ export default function useAudio(sendMessage: (content: string) => Promise<void>
         }
     };
 
-    const speechClient = new OpenAI({ baseURL: "/v1", apiKey: "gsk-001", dangerouslyAllowBrowser: true });
+    const speechClient = new OpenAI({ baseURL: "https://indiecloud.co/v1", apiKey: "gsk-001", dangerouslyAllowBrowser: true });
 
-    // Convert text to speech
     const speakResponse = async (text: string) => {
         try {
-            setIsPlaying(true);
+            const paragraphs = text.split('.').filter(p => p.trim() !== '').map(p => p.trim() + '.'); // Split into paragraphs
 
-            const response = await speechClient.audio.speech.create({
-                model: 'kokoro',
-                voice: 'nova',
-                input: text,
-            });
+            for (const paragraph of paragraphs) {
+                setIsPlaying(true);
+                const response = await speechClient.audio.speech.create({
+                    model: 'kokoro',
+                    voice: 'nova',
+                    input: paragraph,
+                });
+                const blob = await response.blob();
+                const url = URL.createObjectURL(blob);
+                setAudioUrl(url);
+                setLastResponse(0);
 
-            const blob = new Blob([await response.arrayBuffer()], { type: 'audio/mpeg' });
-            const url = URL.createObjectURL(blob);
-            setAudioUrl(url);
-            setLastResponse(0);
+                if (!audioPlayerRef.current) {
+                    audioPlayerRef.current = new Audio();
+                } else {
+                    audioPlayerRef.current.src = url;
+                    await new Promise(resolve => {
+                        audioPlayerRef.current.onended = resolve;
+                        audioPlayerRef.current.play();
+                        const previousWaveformRef = useRef<number[]>([]);
 
-            if (audioPlayerRef.current) {
-                audioPlayerRef.current.src = url;
-                audioPlayerRef.current.play();
+                        if (!audioPlayerRef.current.onplay) {
+                            audioPlayerRef.current.onplay = () => {
+                                if (audioContextRef.current && analyserRef.current) {
+                                    const source = audioContextRef.current.createMediaElementSource(audioPlayerRef.current!);
+                                    source.connect(analyserRef.current);
+                                    analyserRef.current.connect(audioContextRef.current.destination);
+                                    const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
+                                    const updateWaveform = () => {
+                                        if (!isPlaying) return;
+                                        analyserRef.current!.getByteFrequencyData(dataArray);
+                                        const normalizedData = Array.from(dataArray)
+                                            .slice(0, 50)
+                                            .map(val => val / 255);
 
-                // Set up audio visualization for AI speech
-                audioPlayerRef.current.onplay = () => {
-                    if (audioContextRef.current && analyserRef.current) {
-                        const source = audioContextRef.current.createMediaElementSource(audioPlayerRef.current!);
-                        source.connect(analyserRef.current);
-                        analyserRef.current.connect(audioContextRef.current.destination);
+                                        if (JSON.stringify(normalizedData) !== JSON.stringify(previousWaveformRef.current)) {
+                                            previousWaveformRef.current = normalizedData;
+                                            setAiWaveform(normalizedData);
+                                        }
 
-                        // Start waveform visualization
-                        const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
-                        const updateWaveform = () => {
-                            if (!isPlaying) return;
+                                        if (isPlaying) requestAnimationFrame(updateWaveform);
+                                    };
+                                    updateWaveform();
+                                }
+                            };
+                        }
+                    });
+                }
 
-                            analyserRef.current!.getByteFrequencyData(dataArray);
-                            const normalizedData = Array.from(dataArray)
-                                .slice(0, 50)
-                                .map(val => val / 255);
-                            setAiWaveform(normalizedData);
-
-                            if (isPlaying) requestAnimationFrame(updateWaveform);
-                        };
-                        updateWaveform();
-                    }
-                };
-
-                audioPlayerRef.current.onended = () => {
-                    setIsPlaying(false);
-                    setAiWaveform([]);
-                };
+                setIsPlaying(false);
+                setAiWaveform([]);
             }
         } catch (error) {
             console.error("Error generating speech:", error);
@@ -190,14 +184,14 @@ export default function useAudio(sendMessage: (content: string) => Promise<void>
         }
     };
 
-    // Clean up resources
     useEffect(() => {
-        return () => {
-            if (audioUrl) {
-                URL.revokeObjectURL(audioUrl);
-            }
-        };
-    }, [audioUrl]);
+        if (audioPlayerRef.current) {
+            audioPlayerRef.current.onended = () => {
+                setIsPlaying(false);
+                setAiWaveform([]);
+            };
+        }
+    }, [isPlaying]);
 
     return {
         isRecording,
