@@ -1,0 +1,37 @@
+
+services:
+  nextjs:
+    container_name: nextjs
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    networks:
+      - default
+  kokoro:
+    image: ghcr.io/remsky/kokoro-fastapi-cpu:v0.2.2
+    container_name: kokoro
+    ports:
+      - "8880:8880"
+    restart: always
+    networks:
+      - default    
+
+  proxy:
+    container_name: proxy
+    image: nginx:latest
+    restart: always
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf
+    depends_on:
+      - nextjs
+      - kokoro
+    networks:
+      - default
+
+networks:
+  default:
+    driver: bridge
