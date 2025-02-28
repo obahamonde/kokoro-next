@@ -1,5 +1,5 @@
 "use client";
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { OpenAI } from "openai";
 import { openaiConfig } from "./config.json";
 
@@ -39,11 +39,11 @@ export default function useAudio(sendMessage: (content: string) => Promise<void>
         };
     }, []);
 
-    const togglePanel = () => {
-        setIsPanelOpen(!isPanelOpen);
-    };
+    const togglePanel = useCallback(() => {
+        setIsPanelOpen(prev => !prev);
+    }, []);
 
-    const startRecording = async () => {
+    const startRecording = useCallback(async () => {
         setLastResponse(new Date().getTime());
         try {
             audioChunksRef.current = [];
@@ -86,22 +86,18 @@ export default function useAudio(sendMessage: (content: string) => Promise<void>
         }
         console.log(`Lasted ${new Date().getTime() - lastResponse}`);
         console.log(setLastResponse(0));
-    };
+    }, [isRecording, transcribeAudio]);
 
-    const stopRecording = () => {
+    const stopRecording = useCallback(() => {
         if (mediaRecorderRef.current && isRecording) {
             mediaRecorderRef.current.stop();
             setIsRecording(false);
             setUserWaveform([]);
         }
-    };
+    }, [isRecording]);
 
-    const transcribeAudio = async (audioBlob: Blob) => {
+    const transcribeAudio = useCallback(async (audioBlob: Blob) => {
         try {
-            const formData = new FormData();
-            formData.append('file', audioBlob, 'recording.webm');
-            formData.append('model', 'whisper-large-v3');
-
             const response = await client.audio.transcriptions.create({
                 file: new File([audioBlob], 'recording.webm', { type: 'audio/webm' }),
                 model: 'whisper-large-v3',
@@ -109,7 +105,6 @@ export default function useAudio(sendMessage: (content: string) => Promise<void>
 
             setTranscript(response.text);
 
-            // Send the transcribed message to chat
             if (response.text.trim()) {
                 await sendMessage(response.text);
             }
@@ -117,13 +112,13 @@ export default function useAudio(sendMessage: (content: string) => Promise<void>
             console.error("Error transcribing audio:", error);
             setAudioError("Failed to transcribe audio. Please try again.");
         }
-    };
+    }, [sendMessage]);
 
-    const speechClient = new OpenAI({ baseURL: "https://indiecloud.co/v1", apiKey: "gsk-001", dangerouslyAllowBrowser: true });
+    const speechClient = useMemo(() => new OpenAI({ baseURL: "https://indiecloud.co/v1", apiKey: "gsk-001", dangerouslyAllowBrowser: true }), []);
 
-    const speakResponse = async (text: string) => {
+    const speakResponse = useCallback(async (text: string) => {
         try {
-            const paragraphs = text.split('.').filter(p => p.trim() !== '').map(p => p.trim() + '.'); // Split into paragraphs
+            const paragraphs = text.split('.').filter(p => p.trim() !== '').map(p => p.trim() + '.');
 
             for (const paragraph of paragraphs) {
                 setIsPlaying(true);
@@ -182,7 +177,7 @@ export default function useAudio(sendMessage: (content: string) => Promise<void>
             setAudioError("Failed to generate speech. Please try again.");
             setIsPlaying(false);
         }
-    };
+    }, [isPlaying, speechClient]);
 
     useEffect(() => {
         if (audioPlayerRef.current) {
