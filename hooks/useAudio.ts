@@ -43,6 +43,24 @@ export default function useAudio(sendMessage: (content: string) => Promise<void>
         setIsPanelOpen(prev => !prev);
     }, []);
 
+    const transcribeAudio = useCallback(async (audioBlob: Blob) => {
+        try {
+            const response = await client.audio.transcriptions.create({
+                file: new File([audioBlob], 'recording.webm', { type: 'audio/webm' }),
+                model: 'whisper-large-v3',
+            });
+
+            setTranscript(response.text);
+
+            if (response.text.trim()) {
+                await sendMessage(response.text);
+            }
+        } catch (error) {
+            console.error("Error transcribing audio:", error);
+            setAudioError("Failed to transcribe audio. Please try again.");
+        }
+    }, [sendMessage]);
+
     const startRecording = useCallback(async () => {
         setLastResponse(new Date().getTime());
         try {
@@ -96,23 +114,7 @@ export default function useAudio(sendMessage: (content: string) => Promise<void>
         }
     }, [isRecording]);
 
-    const transcribeAudio = useCallback(async (audioBlob: Blob) => {
-        try {
-            const response = await client.audio.transcriptions.create({
-                file: new File([audioBlob], 'recording.webm', { type: 'audio/webm' }),
-                model: 'whisper-large-v3',
-            });
 
-            setTranscript(response.text);
-
-            if (response.text.trim()) {
-                await sendMessage(response.text);
-            }
-        } catch (error) {
-            console.error("Error transcribing audio:", error);
-            setAudioError("Failed to transcribe audio. Please try again.");
-        }
-    }, [sendMessage]);
 
     const speechClient = useMemo(() => new OpenAI({ baseURL: "https://indiecloud.co/v1", apiKey: "gsk-001", dangerouslyAllowBrowser: true }), []);
 
@@ -134,37 +136,14 @@ export default function useAudio(sendMessage: (content: string) => Promise<void>
 
                 if (!audioPlayerRef.current) {
                     audioPlayerRef.current = new Audio();
-                } else {
+                }
+
+                if (audioPlayerRef.current) {
                     audioPlayerRef.current.src = url;
                     await new Promise(resolve => {
-                        audioPlayerRef.current.onended = resolve;
-                        audioPlayerRef.current.play();
-                        const previousWaveformRef = useRef<number[]>([]);
-
-                        if (!audioPlayerRef.current.onplay) {
-                            audioPlayerRef.current.onplay = () => {
-                                if (audioContextRef.current && analyserRef.current) {
-                                    const source = audioContextRef.current.createMediaElementSource(audioPlayerRef.current!);
-                                    source.connect(analyserRef.current);
-                                    analyserRef.current.connect(audioContextRef.current.destination);
-                                    const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
-                                    const updateWaveform = () => {
-                                        if (!isPlaying) return;
-                                        analyserRef.current!.getByteFrequencyData(dataArray);
-                                        const normalizedData = Array.from(dataArray)
-                                            .slice(0, 50)
-                                            .map(val => val / 255);
-
-                                        if (JSON.stringify(normalizedData) !== JSON.stringify(previousWaveformRef.current)) {
-                                            previousWaveformRef.current = normalizedData;
-                                            setAiWaveform(normalizedData);
-                                        }
-
-                                        if (isPlaying) requestAnimationFrame(updateWaveform);
-                                    };
-                                    updateWaveform();
-                                }
-                            };
+                        if (audioPlayerRef.current) {
+                            audioPlayerRef.current.onended = resolve;
+                            audioPlayerRef.current.play();
                         }
                     });
                 }
@@ -177,7 +156,7 @@ export default function useAudio(sendMessage: (content: string) => Promise<void>
             setAudioError("Failed to generate speech. Please try again.");
             setIsPlaying(false);
         }
-    }, [isPlaying, speechClient]);
+    }, [speechClient, setIsPlaying, setAudioUrl, setLastResponse, setAiWaveform, setAudioError]);
 
     useEffect(() => {
         if (audioPlayerRef.current) {
